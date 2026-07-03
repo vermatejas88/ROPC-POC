@@ -68,7 +68,7 @@ Create a Test User: In your new test tenant, create a dedicated test user accoun
 Important: This test user must not have multi-factor authentication (MFA) enforced. ROPC is incompatible with MFA, and the request will be blocked if MFA is required.
 
 
-2. Configure a Test App Registration"
+2. Configure a Test App Registration:
 
 * You will also need an app registration specifically for your tests.
 
@@ -80,11 +80,11 @@ Configure API Permissions and Pre-consent: Go to API permissions and add the per
 
 
 3. The ROPC Token Request
-With your test environment ready, you can now make a single POST request to the Microsoft identity platform token endpoint to get an access token.
+* With your test environment ready, you can now make a single POST request to the Microsoft identity platform token endpoint to get an access token.
 
 Key Information Needed:
 
-tenant: Your tenant ID or a domain name (like yourtesttenant.onmicrosoft.com). You cannot use the common or consumers endpoints; use your tenant-specific endpoint (https://login.microsoftonline.com/{TenantId_or_Name}) or organizations.
+*tenant: Your tenant ID or a domain name (like yourtesttenant.onmicrosoft.com). You cannot use the common or consumers endpoints; use your tenant-specific endpoint (https://login.microsoftonline.com/{TenantId_or_Name}) or organizations.
 
 client_id: The Application (client) ID of your test app registration.
 
