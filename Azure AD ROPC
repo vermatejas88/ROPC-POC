@@ -1,0 +1,122 @@
+/**
+ * Azure AD (Entra ID) - Resource Owner Password Credentials (ROPC) Flow POC
+ * ----------------------------------------------------------------------
+ * Demonstrates acquiring an access token directly from a username/password
+ * using the OAuth2 "password" grant against Azure AD's v2.0 token endpoint.
+ *
+ * IMPORTANT LIMITATIONS (read before using this anywhere near production):
+ * - ROPC does NOT work if the user account has MFA enabled, is a guest/B2B
+ *   account, uses federated auth (ADFS), or requires Conditional Access
+ *   satisfaction (device compliance, sign-in risk, etc.) — the request
+ *   will simply fail.
+ * - Microsoft explicitly discourages ROPC. It bypasses the interactive
+ *   sign-in UI entirely, which means your app becomes responsible for
+ *   handling the user's raw password. There's no support for passwordless,
+ *   FIDO2, smart card, or SSO scenarios.
+ * - Personal Microsoft accounts (outlook.com/live.com/hotmail.com) are not
+ *   supported at all — only work/school (Azure AD) accounts.
+ * - Use only for POC/testing/legacy migration scenarios, or for daemon-like
+ *   automation against dedicated non-interactive test accounts. For real
+ *   apps, use Authorization Code + PKCE (interactive) via MSAL instead.
+ *
+ * Setup required in Azure AD:
+ * 1. App registration > Authentication > enable "Allow public client flows".
+ * 2. API permissions must NOT require admin consent for the scopes you use,
+ *    and the tenant must allow ROPC (some tenants block it via CA policy).
+ * 3. The app registration must be a "public client" (no client secret used
+ *    here, matching the public client flow — though ROPC can also be done
+ *    confidential; this POC uses the public client variant).
+ *
+ * Reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth-ropc
+ *
+ * Usage:
+ *   npm install dotenv                   (Node 18+ has global fetch built in)
+ *   Create a .env file with the variables below, then:
+ *   node azure-ad-ropc-poc.js
+ */
+
+require('dotenv').config();
+
+// ---- Configuration (fill in via .env or environment variables) ----
+const TENANT_ID = process.env.AZURE_TENANT_ID;       // e.g. contoso.onmicrosoft.com or GUID
+const CLIENT_ID = process.env.AZURE_CLIENT_ID;       // App registration (public client) ID
+const USERNAME = process.env.AZURE_ROPC_USERNAME;    // test user UPN, e.g. user@contoso.com
+const PASSWORD = process.env.AZURE_ROPC_PASSWORD;    // test user password
+// Per Microsoft's docs, include openid+profile to get an id_token, and
+// offline_access to get a refresh_token. Add resource-specific scopes
+// (e.g. "User.Read" for Graph) as needed.
+const SCOPE = process.env.AZURE_SCOPE || 'openid profile offline_access User.Read';
+
+const TOKEN_ENDPOINT = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+
+async function getTokenWithROPC() {
+  if (!TENANT_ID || !CLIENT_ID || !USERNAME || !PASSWORD) {
+    throw new Error(
+      'Missing required env vars. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, ' +
+      'AZURE_ROPC_USERNAME, AZURE_ROPC_PASSWORD (and optionally AZURE_SCOPE).'
+    );
+  }
+  if (TENANT_ID === 'common' || TENANT_ID === 'consumers') {
+    // Per the docs: ROPC is not supported on /common or /consumers.
+    // Use a tenant ID/domain, or "organizations".
+    throw new Error('AZURE_TENANT_ID cannot be "common" or "consumers" for ROPC. Use a tenant ID/domain or "organizations".');
+  }
+
+  const body = new URLSearchParams({
+    grant_type: 'password',
+    client_id: CLIENT_ID,
+    username: USERNAME,
+    password: PASSWORD,
+    scope: SCOPE,
+  });
+
+  const response = await fetch(TOKEN_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    // Per the Microsoft docs, the two protocol-level errors are:
+    //   invalid_grant   - bad credentials, or scopes not consented (may include
+    //                      a nested "consent_required" - fall back to interactive auth)
+    //   invalid_request - wrong tenant segment (grant not supported on
+    //                      /common or /consumers; use /organizations or a tenant ID)
+    // Underlying AADSTS codes to watch for: AADSTS50076 (MFA required),
+    // AADSTS50126 (bad credentials), AADSTS700016 (invalid client),
+    // AADSTS90014 (missing required field), AADSTS50034 (user doesn't exist).
+    console.error('Token request failed:', response.status, JSON.stringify(data, null, 2));
+    throw new Error(`ROPC token request failed: ${data.error} - ${data.error_description}`);
+  }
+
+  return data; // token_type, scope, expires_in, access_token, id_token (if openid), refresh_token (if offline_access)
+}
+
+(async () => {
+  try {
+    console.log(`Requesting token from tenant ${TENANT_ID} for user ${USERNAME}...`);
+    const tokenResponse = await getTokenWithROPC();
+
+    console.log('\n✅ Token acquired successfully');
+    console.log('Token type:  ', tokenResponse.token_type);
+    console.log('Expires in:  ', tokenResponse.expires_in, 'seconds');
+    console.log('Scope:       ', tokenResponse.scope);
+    console.log('Access token (first 40 chars):', tokenResponse.access_token.slice(0, 40) + '...');
+    if (tokenResponse.refresh_token) console.log('Refresh token received (offline_access granted).');
+    if (tokenResponse.id_token) console.log('ID token received (openid granted).');
+
+    // Example: use the access token to call Microsoft Graph
+    if (SCOPE.includes('User.Read') || SCOPE.includes('graph.microsoft.com')) {
+      const meResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+      });
+      const me = await meResponse.json();
+      console.log('\n/me response:', JSON.stringify(me, null, 2));
+    }
+  } catch (err) {
+    console.error('\n❌ POC failed:', err.message);
+    process.exitCode = 1;
+  }
+})();
