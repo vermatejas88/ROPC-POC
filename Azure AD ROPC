@@ -28,95 +28,107 @@
  *    confidential; this POC uses the public client variant).
  *
  * Reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth-ropc
- *
- * Usage:
- *   npm install dotenv                   (Node 18+ has global fetch built in)
- *   Create a .env file with the variables below, then:
- *   node azure-ad-ropc-poc.js
- */
 
-require('dotenv').config();
 
-// ---- Configuration (fill in via .env or environment variables) ----
-const TENANT_ID = process.env.AZURE_TENANT_ID;       // e.g. contoso.onmicrosoft.com or GUID
-const CLIENT_ID = process.env.AZURE_CLIENT_ID;       // App registration (public client) ID
-const USERNAME = process.env.AZURE_ROPC_USERNAME;    // test user UPN, e.g. user@contoso.com
-const PASSWORD = process.env.AZURE_ROPC_PASSWORD;    // test user password
-// Per Microsoft's docs, include openid+profile to get an id_token, and
-// offline_access to get a refresh_token. Add resource-specific scopes
-// (e.g. "User.Read" for Graph) as needed.
-const SCOPE = process.env.AZURE_SCOPE || 'openid profile offline_access User.Read';
 
-const TOKEN_ENDPOINT = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+===============================================================================================
 
-async function getTokenWithROPC() {
-  if (!TENANT_ID || !CLIENT_ID || !USERNAME || !PASSWORD) {
-    throw new Error(
-      'Missing required env vars. Set AZURE_TENANT_ID, AZURE_CLIENT_ID, ' +
-      'AZURE_ROPC_USERNAME, AZURE_ROPC_PASSWORD (and optionally AZURE_SCOPE).'
-    );
-  }
-  if (TENANT_ID === 'common' || TENANT_ID === 'consumers') {
-    // Per the docs: ROPC is not supported on /common or /consumers.
-    // Use a tenant ID/domain, or "organizations".
-    throw new Error('AZURE_TENANT_ID cannot be "common" or "consumers" for ROPC. Use a tenant ID/domain or "organizations".');
-  }
+* Requirement:
 
-  const body = new URLSearchParams({
-    grant_type: 'password',
-    client_id: CLIENT_ID,
-    username: USERNAME,
-    password: PASSWORD,
-    scope: SCOPE,
-  });
+The Application (client) ID is a unique identifier assigned to your app when you register it in the Microsoft Entra admin center .
 
-  const response = await fetch(TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
+You can find this ID along with your Tenant ID on your app's Overview page within App registrations . Here is the exact path:
 
-  const data = await response.json();
+Sign in to the Microsoft Entra admin center .
 
-  if (!response.ok) {
-    // Per the Microsoft docs, the two protocol-level errors are:
-    //   invalid_grant   - bad credentials, or scopes not consented (may include
-    //                      a nested "consent_required" - fall back to interactive auth)
-    //   invalid_request - wrong tenant segment (grant not supported on
-    //                      /common or /consumers; use /organizations or a tenant ID)
-    // Underlying AADSTS codes to watch for: AADSTS50076 (MFA required),
-    // AADSTS50126 (bad credentials), AADSTS700016 (invalid client),
-    // AADSTS90014 (missing required field), AADSTS50034 (user doesn't exist).
-    console.error('Token request failed:', response.status, JSON.stringify(data, null, 2));
-    throw new Error(`ROPC token request failed: ${data.error} - ${data.error_description}`);
-  }
+Navigate to Identity > Applications > App registrations .
 
-  return data; // token_type, scope, expires_in, access_token, id_token (if openid), refresh_token (if offline_access)
+Select your application from the list .
+
+On the Overview page, look for the Essentials section. There you will find both the Application (client) ID and the Directory (tenant) ID .
+
+If you need to create a new app registration to get a Client ID, select New registration on the App registrations page, fill in the required details, and select Register. 
+The Overview page will then display the new Client ID and Tenant ID .
+
+=========================================================================================================================================
+
+To test the OAuth 2.0 Resource Owner Password Credentials (ROPC) flow with Microsoft Entra ID,
+you will need to prepare your test environment and then make a specific API request using the credentials you've obtained.
+
+Here is a step-by-step guide to get everything you need and execute a test.
+
+1. Prerequisites: 
+* Create a Dedicated Test Tenant and User
+It is crucial to use a separate test tenant for this, as Microsoft strongly recommends against using the ROPC flow in any production environment.
+
+Create a Test Tenant: If you don't have one, create a new Microsoft Entra tenant for testing purposes. You can use the Microsoft 365 Developer Program or a free Azure account.
+
+Create a Test User: In your new test tenant, create a dedicated test user account. Since this account won't be used by a real person, assign it a strong, complex password.
+
+Important: This test user must not have multi-factor authentication (MFA) enforced. ROPC is incompatible with MFA, and the request will be blocked if MFA is required.
+
+
+2. Configure a Test App Registration"
+
+* You will also need an app registration specifically for your tests.
+
+Register an App: In the Microsoft Entra admin center, navigate to App registrations and create a new application. Take note of the Application (client) ID that is assigned to it; you will need this for your API request.
+
+Enable Public Client Flows: ROPC is a public client flow. In your app's registration, go to Authentication. Under Advanced settings, set Allow public client flows to Yes.
+
+Configure API Permissions and Pre-consent: Go to API permissions and add the permissions your app needs for testing. 
+
+
+3. The ROPC Token Request
+With your test environment ready, you can now make a single POST request to the Microsoft identity platform token endpoint to get an access token.
+
+Key Information Needed:
+
+tenant: Your tenant ID or a domain name (like yourtesttenant.onmicrosoft.com). You cannot use the common or consumers endpoints; use your tenant-specific endpoint (https://login.microsoftonline.com/{TenantId_or_Name}) or organizations.
+
+client_id: The Application (client) ID of your test app registration.
+
+username: The username (UPN, usually an email address) of your test user.
+
+password: The password of your test user.
+
+Example  (HTTP):
+
+Payload:
+* 
+POST https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token
+tenant:your_tenat_id
+client_id: your_client-id
+scope:user.read openid profile offline_access
+username:yourusername@xyz.onmicrosoft.com
+password: user account password
+grant_type:password
+client_secret: your client secret.
+
+Parameters:
+
+Parameter	Condition	Description
+tenant	Required	Your directory tenant in GUID or domain name format. Cannot be common or consumers.
+client_id	Required	The Application (client) ID assigned to your app.
+grant_type	Required	Must be set to password.
+username	Required	The user's email address (UPN).
+password	Required	The user's password.
+scope	Recommended	A space-separated list of permissions your app requires, which must be pre-consented.
+4. Understanding the Response
+Success: A successful request will return a JSON object containing an access_token, an id_token (if openid scope was requested), and an optional refresh_token (if offline_access scope was requested).
+
+Example success response:
+
+json
+{
+    "token_type": "Bearer",
+    "scope": "User.Read profile openid email",
+    "expires_in": 3599,
+    "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik5HVEZ2ZEstZnl0aEV1Q...",
+    "refresh_token": "AwABAAAAvPM1KaPlrEqdFSBzjqfTGAMxZGUTdM0t4B4...",
+    "id_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.eyJhdWQiOiIyZDRkMTFhMi1mODE0LTQ2YTctOD..."
 }
 
-(async () => {
-  try {
-    console.log(`Requesting token from tenant ${TENANT_ID} for user ${USERNAME}...`);
-    const tokenResponse = await getTokenWithROPC();
+Failure: Common errors include invalid_grant, which usually means the credentials were incorrect, the user has MFA enabled, or the app has not been consented for the requested scopes.
 
-    console.log('\n✅ Token acquired successfully');
-    console.log('Token type:  ', tokenResponse.token_type);
-    console.log('Expires in:  ', tokenResponse.expires_in, 'seconds');
-    console.log('Scope:       ', tokenResponse.scope);
-    console.log('Access token (first 40 chars):', tokenResponse.access_token.slice(0, 40) + '...');
-    if (tokenResponse.refresh_token) console.log('Refresh token received (offline_access granted).');
-    if (tokenResponse.id_token) console.log('ID token received (openid granted).');
-
-    // Example: use the access token to call Microsoft Graph
-    if (SCOPE.includes('User.Read') || SCOPE.includes('graph.microsoft.com')) {
-      const meResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
-      });
-      const me = await meResponse.json();
-      console.log('\n/me response:', JSON.stringify(me, null, 2));
-    }
-  } catch (err) {
-    console.error('\n❌ POC failed:', err.message);
-    process.exitCode = 1;
-  }
-})();
+Security Warning: Microsoft strongly discourages using ROPC in production due to significant security risks and incompatibility with modern authentication features. It should be strictly limited to testing scenarios in a dedicated test environment. After a successful request, your application must securely discard the user's password from memory and never save it
